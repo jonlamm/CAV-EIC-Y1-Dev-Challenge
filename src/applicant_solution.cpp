@@ -20,6 +20,21 @@ void AntWorld::forage() {
     // this->ants[0].erasePheromone(this->pheromoneMap);
     //
     // this->ants[0].returnHome(this->terrainMap, this->foodMap);
+    for (Ant &ant : this->ants) {
+        if (ant.carryingFood) {
+            ant.returnHome(this->terrainMap, this->foodMap);
+            continue;
+        }
+
+        std::vector<Coord>visibleFood=ant.foodScan(this->foodMap);
+
+        if (!visibleFood.empty()) {
+            Coord destination=visibleFood[0];
+
+            ant.move(this->terrainMap,destination,this->foodMap);
+        }
+    }
+
 }
 
 /** You may insert any custom functions below **/
