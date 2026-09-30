@@ -4,6 +4,7 @@
 
 #include "../include/antworld.h"
 #include <iostream>
+#include <algorithm>
 
 /** @brief this is where you as the applicant will make use of the above functions to develop your solution.
  * here are some existing examples of how calling these functions works to help get you started!
@@ -29,9 +30,23 @@ void AntWorld::forage() {
 
     int antNumber=1;
 
+    std::vector<Coord> explorationDirections={
+        Coord(-1,0), //ant1 north
+        Coord(-1,1), //ant2 northeast
+        //and so on
+        Coord(0,1),
+        Coord(1,1),
+        Coord(1,0),
+        Coord(1,-1),
+        Coord(0,-1),
+        Coord(-1,-1)
+    };
+
     for (Ant &ant : this->ants) {
         int currentAntNumber=antNumber;
         antNumber++;
+
+        Coord explorationDirection=explorationDirections[currentAntNumber-1];
         if (ant.carryingFood) {
             ant.returnHome(this->terrainMap, this->foodMap);
             std::cout << "Ant "<<currentAntNumber<<" returned to ("<< ant.position.first << ", "<< ant.position.second << ")"<< std::endl;
@@ -63,7 +78,35 @@ void AntWorld::forage() {
                 ant.move(this->terrainMap, destination,this->foodMap);
 
                 std::cout << "Ant "<<currentAntNumber<<" moved to ("<< ant.position.first << ", "<< ant.position.second << ")"<< " | carrying food: "<< ant.carryingFood<< " | energy: "<< ant.energy<< std::endl;
+                continue;
             }
+        }
+        int explorationDistance=ant.foodRadius+1;
+
+        int targetRow= ant.position.first+explorationDirection.first*explorationDistance;
+
+        int targetColumn=ant.position.second+explorationDirection.second*explorationDistance;
+
+        targetRow=std::clamp(targetRow,0,static_cast<int>(this->terrainMap.size())-1);
+
+        targetColumn=std::clamp(targetColumn,0,static_cast<int>(this->terrainMap[0].size())-1);
+
+        Coord explorationTarget=Coord(targetRow,targetColumn);
+
+        std::vector<Coord> pathToExplorationTarget=shortestPath(this->terrainMap,ant.position,explorationTarget);
+        std::vector<Coord> pathFromTargetHome = shortestPath(this->terrainMap,explorationTarget,ant.homeCoord);
+        int explorationRoundTripCost=calculatePathCost(this->terrainMap,pathToExplorationTarget)+calculatePathCost(this->terrainMap,pathFromTargetHome);
+        bool targetIsNew=explorationTarget != ant.position;
+
+        if (targetIsNew && explorationRoundTripCost<=ant.energy){
+            ant.move(this->terrainMap,explorationTarget,this->foodMap);
+
+            std::cout << "Ant " << currentAntNumber<< " explored to ("<< ant.position.first << ", "<< ant.position.second << ")"<< " | carrying food: "<< ant.carryingFood<< " | energy: "<< ant.energy<< std::endl;
+
+        }
+        else if (ant.position != ant.homeCoord) {
+            ant.returnHome(this->terrainMap,this->foodMap);
+            std::cout << "Ant " << currentAntNumber<< " stopped exploring and returned to ("<< ant.position.first << ", "<< ant.position.second << ")"<< " | energy: "<< ant.energy<< std::endl;
         }
     }
 
