@@ -23,6 +23,9 @@ void AntWorld::forage() {
     // this->ants[0].returnHome(this->terrainMap, this->foodMap);
     static int lastPrintedScore = -1;
     static std::vector<Coord> knownFoodLocations;
+    static std::vector<Coord> scoutDiscoveries;
+    static int activeScoutIndex = -1;
+    static int activeZoneIndex = -1;
 
     if (this->score != lastPrintedScore) {
         std::cout << "SCORE: " << this->score << std::endl;
@@ -66,7 +69,7 @@ void AntWorld::forage() {
             zoneIndex++) {zoneOrder.push_back(zoneIndex);}
 
         std::sort(zoneOrder.begin(),zoneOrder.end(),[](int firstZoneIndex,int secondZoneIndex){
-            return zoneTravelCosts[firstZoneIndex]>zoneTravelCosts[secondZoneIndex];});
+            return zoneTravelCosts[firstZoneIndex]<zoneTravelCosts[secondZoneIndex];});
     };
 
     static std::vector<int> assignedZoneByAnt;
@@ -78,113 +81,259 @@ void AntWorld::forage() {
         zoneCompleted=std::vector<bool>(searchZones.size(), false);
     }
 
+    bool allAntsReadyAtHome = true;
+
     for (int antIndex = 0;
          antIndex < static_cast<int>(this->ants.size());
          antIndex++) {
-        Ant &currentAnt = this->ants[antIndex];
 
-        bool antIsReadyAtHome =
-            currentAnt.position == currentAnt.homeCoord &&
-            !currentAnt.carryingFood;
+        bool antIsHome =
+            this->ants[antIndex].position ==
+            this->ants[antIndex].homeCoord;
 
-        if (antIsReadyAtHome) {
-            assignedZoneByAnt[antIndex] = -1;
-        }
-    }
-    std::vector<int> availableAntOrder;
+        bool antIsCarryingFood =
+            this->ants[antIndex].carryingFood;
 
-    for (int antIndex=0;
-        antIndex<static_cast<int>(this->ants.size());
-        antIndex++) {
-
-        bool antHasNoZone=assignedZoneByAnt[antIndex]==-1;
-
-        bool antIsHome=this->ants[antIndex].position==this->ants[antIndex].homeCoord;
-
-        bool antIsNotCarryingFood=!this->ants[antIndex].carryingFood;
-
-        if (antHasNoZone&&antIsHome&&antIsNotCarryingFood) {
-            availableAntOrder.push_back(antIndex);
+        if (!antIsHome || antIsCarryingFood) {
+            allAntsReadyAtHome = false;
+            break;
         }
     }
 
-    std::sort(availableAntOrder.begin(),
-        availableAntOrder.end(),
-        [this](int firstAntIndex,int secondAntIndex) {
-            return this->ants[firstAntIndex].energy>this->ants[secondAntIndex].energy;
-        });
+    if (allAntsReadyAtHome &&
+        !knownFoodLocations.empty()) {
 
-    for (int availableAntIndex:availableAntOrder) {
-        for (int candidateZoneIndex:zoneOrder) {
-            if (zoneCompleted[candidateZoneIndex]) {
-                continue;
-            }
-            bool zoneAlreadyAssigned=false;
+        bool anyReportedFoodReachable = false;
 
-            for (int currentAssignment:assignedZoneByAnt) {
-                if (currentAssignment==candidateZoneIndex) {
-                    zoneAlreadyAssigned=true;
+        for (int antIndex = 0;
+             antIndex < static_cast<int>(this->ants.size());
+             antIndex++) {
+
+            Ant &candidateCollector =
+                this->ants[antIndex];
+
+            for (Coord reportedFood : knownFoodLocations) {
+                std::vector<Coord> pathToFood =
+                    shortestPath(
+                        this->terrainMap,
+                        candidateCollector.homeCoord,
+                        reportedFood
+                    );
+
+                std::vector<Coord> pathHome =
+                    shortestPath(
+                        this->terrainMap,
+                        reportedFood,
+                        candidateCollector.homeCoord
+                    );
+
+                int requiredEnergy =
+                    calculatePathCost(
+                        this->terrainMap,
+                        pathToFood
+                    )
+                    +
+                    calculatePathCost(
+                        this->terrainMap,
+                        pathHome
+                    );
+
+                if (requiredEnergy <
+                    candidateCollector.energy) {
+
+                    anyReportedFoodReachable = true;
                     break;
                 }
             }
-            if (zoneAlreadyAssigned) {
-                continue;
-            }
-            int requiredRoundTripEnergy=zoneTravelCosts[candidateZoneIndex]*2;
 
-            if (requiredRoundTripEnergy<this->ants[availableAntIndex].energy) {
-                assignedZoneByAnt[availableAntIndex]=candidateZoneIndex;
-
-                Coord newZone=searchZones[candidateZoneIndex];
-
-                std::cout << "Reassigned Ant "<< availableAntIndex + 1<< " with remaining energy "<< this->ants[availableAntIndex].energy<< " to zone ("<< newZone.first << ", "<< newZone.second << ")"<< std::endl;
-
+            if (anyReportedFoodReachable) {
                 break;
             }
         }
+
+        if (!anyReportedFoodReachable) {
+            std::cout << "Abandoning "
+                      << knownFoodLocations.size()
+                      << " unreachable reported food locations"
+                      << std::endl;
+
+            knownFoodLocations.clear();
+        }
     }
 
+    bool colonyReadyToScout =
+        activeScoutIndex == -1 &&
+        knownFoodLocations.empty() &&
+        allAntsReadyAtHome;
 
-    int antNumber=1;
+    if (colonyReadyToScout) {
+        int nextZoneIndex = -1;
 
-//    std::vector<Coord> explorationDirections={
-//        Coord(-1,0), //ant1 north
-//        Coord(-1,1), //ant2 northeast
-//        //and so on
-//        Coord(0,1),
-//        Coord(1,1),
-//        Coord(1,0),
-//        Coord(1,-1),
-//        Coord(0,-1),
-//        Coord(-1,-1)
-//    };
-
-    for (Ant &ant : this->ants) {
-        int currentAntNumber=antNumber;
-        antNumber++;
-
-        //Coord explorationDirection=explorationDirections[currentAntNumber-1];
-        if (ant.carryingFood) {
-            ant.returnHome(this->terrainMap, this->foodMap);
-            std::cout << "Ant "<<currentAntNumber<<" returned to ("<< ant.position.first << ", "<< ant.position.second << ")"<< std::endl;
-            continue;
+        for (int candidateZoneIndex : zoneOrder) {
+            if (!zoneCompleted[candidateZoneIndex]) {
+                nextZoneIndex = candidateZoneIndex;
+                break;
+            }
         }
 
-        std::vector<Coord>visibleFood=ant.foodScan(this->foodMap);
+        if (nextZoneIndex != -1) {
+            int requiredScoutEnergy =
+                zoneTravelCosts[nextZoneIndex] * 2;
 
-        for (Coord discoveredFood : visibleFood) {
-            bool foodAlreadyKnown = false;
+            int selectedScoutIndex = -1;
 
-            for (Coord knownFood : knownFoodLocations) {
-                if (knownFood == discoveredFood) {
-                    foodAlreadyKnown = true;
-                    break;
+            for (int antIndex = 0;
+                 antIndex < static_cast<int>(this->ants.size());
+                 antIndex++) {
+
+                bool antCanScout =
+                    requiredScoutEnergy <
+                    this->ants[antIndex].energy;
+
+                bool antUsesLessEnergy =
+                    selectedScoutIndex == -1 ||
+                    this->ants[antIndex].energy <
+                    this->ants[selectedScoutIndex].energy;
+
+                if (antCanScout && antUsesLessEnergy) {
+                    selectedScoutIndex = antIndex;
                 }
             }
 
-            if (!foodAlreadyKnown) {
-                knownFoodLocations.push_back(discoveredFood);
+            if (selectedScoutIndex != -1) {
+                activeScoutIndex = selectedScoutIndex;
+                activeZoneIndex = nextZoneIndex;
+
+                assignedZoneByAnt[activeScoutIndex] =
+                    activeZoneIndex;
+
+                scoutDiscoveries.clear();
+
+                Coord scoutZone =
+                    searchZones[activeZoneIndex];
+
+                std::cout << "Selected Ant "<< activeScoutIndex + 1<< " with energy "<< this->ants[activeScoutIndex].energy<< " to scout zone ("<< scoutZone.first << ", "<< scoutZone.second << ")"<< std::endl;
             }
+        }
+    }
+
+    std::vector<int> actionOrder;
+
+    for (int antIndex = 0;
+         antIndex < static_cast<int>(this->ants.size());
+         antIndex++) {
+        actionOrder.push_back(antIndex);
+    }
+
+    std::sort(
+        actionOrder.begin(),
+        actionOrder.end(),
+        [this](int firstAntIndex, int secondAntIndex) {
+            return this->ants[firstAntIndex].energy <
+                   this->ants[secondAntIndex].energy;
+        }
+    );
+
+    for (int antIndex : actionOrder) {
+
+        Ant &ant = this->ants[antIndex];
+        int currentAntNumber = antIndex + 1;
+
+        bool antIsActiveScout =
+            antIndex == activeScoutIndex;
+
+        if (antIsActiveScout) {
+            Coord scoutTarget =
+                searchZones[activeZoneIndex];
+
+            if (ant.position != scoutTarget) {
+                ant.move(
+                    this->terrainMap,
+                    scoutTarget,
+                    this->foodMap
+                );
+
+                std::cout << "Scout Ant "
+                          << currentAntNumber
+                          << " travelled to zone ("
+                          << scoutTarget.first << ", "
+                          << scoutTarget.second << ")"
+                          << " | energy: "
+                          << ant.energy
+                          << std::endl;
+
+                continue;
+            }
+
+            std::vector<Coord> scoutVisibleFood =
+                ant.foodScan(this->foodMap);
+
+            for (Coord discoveredFood : scoutVisibleFood) {
+                bool discoveryAlreadyStored = false;
+
+                for (Coord storedDiscovery : scoutDiscoveries) {
+                    if (storedDiscovery == discoveredFood) {
+                        discoveryAlreadyStored = true;
+                        break;
+                    }
+                }
+
+                if (!discoveryAlreadyStored) {
+                    scoutDiscoveries.push_back(discoveredFood);
+                }
+            }
+
+            zoneCompleted[activeZoneIndex] = true;
+
+            ant.returnHome(
+                this->terrainMap,
+                this->foodMap
+            );
+
+            if (ant.position == ant.homeCoord) {
+                for (Coord reportedFood : scoutDiscoveries) {
+                    bool foodAlreadyReported = false;
+
+                    for (Coord knownFood : knownFoodLocations) {
+                        if (knownFood == reportedFood) {
+                            foodAlreadyReported = true;
+                            break;
+                        }
+                    }
+
+                    if (!foodAlreadyReported) {
+                        knownFoodLocations.push_back(reportedFood);
+                    }
+                }
+
+                std::cout << "Scout Ant "
+                          << currentAntNumber
+                          << " returned home and reported "
+                          << scoutDiscoveries.size()
+                          << " food locations"
+                          << std::endl;
+
+                assignedZoneByAnt[antIndex] = -1;
+                activeScoutIndex = -1;
+                activeZoneIndex = -1;
+                scoutDiscoveries.clear();
+            }
+
+            continue;
+        }
+
+        if (ant.carryingFood) {
+            ant.returnHome(
+                this->terrainMap,
+                this->foodMap
+            );
+
+            std::cout << "Collector Ant "
+                      << currentAntNumber
+                      << " returned home"
+                      << std::endl;
+
+            continue;
         }
 
         if (!knownFoodLocations.empty()) {
@@ -238,7 +387,9 @@ void AntWorld::forage() {
                 if (finalPosition == destination) {
                     for (int knownFoodIndex = 0;
                          knownFoodIndex <
-                         static_cast<int>(knownFoodLocations.size());
+                         static_cast<int>(
+                             knownFoodLocations.size()
+                         );
                          knownFoodIndex++) {
 
                         if (knownFoodLocations[knownFoodIndex] ==
@@ -254,12 +405,11 @@ void AntWorld::forage() {
                     }
                 }
 
-                std::cout << "Ant " << currentAntNumber
-                          << " moved to known food at ("
+                std::cout << "Collector Ant "
+                          << currentAntNumber
+                          << " collected reported food at ("
                           << ant.position.first << ", "
                           << ant.position.second << ")"
-                          << " | carrying food: "
-                          << ant.carryingFood
                           << " | energy: "
                           << ant.energy
                           << std::endl;
@@ -267,105 +417,12 @@ void AntWorld::forage() {
                 continue;
             }
         }
-        /*   OLD CODE FOR DIRECTIONS VERSION
-        int explorationDistance=ant.foodRadius+1;
 
-        int targetRow= ant.position.first+explorationDirection.first*explorationDistance;
-
-        int targetColumn=ant.position.second+explorationDirection.second*explorationDistance;
-
-        targetRow=std::clamp(targetRow,0,static_cast<int>(this->terrainMap.size())-1);
-
-        targetColumn=std::clamp(targetColumn,0,static_cast<int>(this->terrainMap[0].size())-1);
-
-        Coord explorationTarget=Coord(targetRow,targetColumn);*/
-
-        int antIndex=currentAntNumber-1;
-
-        int assignedZoneIndex=assignedZoneByAnt[antIndex];
-
-        if (assignedZoneIndex==-1) {
-            if (ant.position!=ant.homeCoord) {
-                ant.returnHome(this->terrainMap, this->foodMap);
-            }
-            continue;
-/*
-            for (int candidateZoneIndex:zoneOrder) {
-                if (zoneCompleted[candidateZoneIndex]) {
-                    continue;
-                }
-
-                bool zoneAlreadyAssigned=false;
-
-                for (int currentAssignment:assignedZoneByAnt) {
-                    if (currentAssignment==candidateZoneIndex) {
-                        zoneAlreadyAssigned=true;
-                        break;
-
-                    }
-                }
-
-                if (zoneAlreadyAssigned) {
-                    continue;
-                }
-
-                int requiredRoundTripEnergy=zoneTravelCosts[candidateZoneIndex]*2;
-
-                if (requiredRoundTripEnergy<=ant.energy) {
-                    assignedZoneByAnt[antIndex]=candidateZoneIndex;
-
-                    assignedZoneIndex=candidateZoneIndex;
-                    Coord newZone=searchZones[candidateZoneIndex];
-
-                    std::cout<<"Reassigned Ant "<< currentAntNumber<< " to zone ("<< newZone.first << ", "<< newZone.second << ")"<< std::endl;
-                    break;
-                }
-            }
-
-            if (assignedZoneIndex==-1) {
-                continue;
-            }*/
-        }
-
-        Coord explorationTarget=searchZones[assignedZoneIndex];
-
-        if (ant.position==explorationTarget && visibleFood.empty()) {
-            zoneCompleted[assignedZoneIndex]=true;
-            assignedZoneByAnt[antIndex]=-1;
-
-            std::cout<<"ant "<<currentAntNumber<< " completed zone ("<< explorationTarget.first << ", "<< explorationTarget.second << ")"<< std::endl;
-
-            if (ant.position!=ant.homeCoord) {
-                ant.returnHome(this->terrainMap,this->foodMap);
-                std::cout <<"Ant "<<currentAntNumber<<" returned home after completing its zone"<<std::endl;
-            }
-            continue;
-        }
-
-        std::vector<Coord> pathToExplorationTarget=shortestPath(this->terrainMap,ant.position,explorationTarget);
-        std::vector<Coord> pathFromTargetHome = shortestPath(this->terrainMap,explorationTarget,ant.homeCoord);
-        int explorationRoundTripCost=calculatePathCost(this->terrainMap,pathToExplorationTarget)+calculatePathCost(this->terrainMap,pathFromTargetHome);
-        bool targetIsNew=explorationTarget != ant.position;
-
-        if (targetIsNew && explorationRoundTripCost<ant.energy){
-            ant.move(this->terrainMap,explorationTarget,this->foodMap);
-
-            std::cout << "Ant " << currentAntNumber<< " explored to ("<< ant.position.first << ", "<< ant.position.second << ")"<< " | carrying food: "<< ant.carryingFood<< " | energy: "<< ant.energy<< std::endl;
-        }
-        else if (targetIsNew) {
-            assignedZoneByAnt[antIndex]=-1;
-            std::cout << "Ant " << currentAntNumber<< " released zone ("<< explorationTarget.first << ", "<< explorationTarget.second<< ") because it no longer has enough energy"<< std::endl;
-
-            if (ant.position != ant.homeCoord) {
-                ant.returnHome(this->terrainMap,this->foodMap);
-            }
-            continue;
-        }
-
-
-        else if (ant.position != ant.homeCoord) {
-            ant.returnHome(this->terrainMap,this->foodMap);
-            std::cout << "Ant " << currentAntNumber<< " stopped exploring and returned to ("<< ant.position.first << ", "<< ant.position.second << ")"<< " | energy: "<< ant.energy<< std::endl;
+        if (ant.position != ant.homeCoord) {
+            ant.returnHome(
+                this->terrainMap,
+                this->foodMap
+            );
         }
     }
 
