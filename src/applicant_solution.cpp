@@ -22,6 +22,7 @@ void AntWorld::forage() {
     //
     // this->ants[0].returnHome(this->terrainMap, this->foodMap);
     static int lastPrintedScore = -1;
+    static std::vector<Coord> knownFoodLocations;
 
     if (this->score != lastPrintedScore) {
         std::cout << "SCORE: " << this->score << std::endl;
@@ -89,7 +90,7 @@ void AntWorld::forage() {
         if (antIsReadyAtHome) {
             assignedZoneByAnt[antIndex] = -1;
         }
-    }         
+    }
     std::vector<int> availableAntOrder;
 
     for (int antIndex=0;
@@ -171,29 +172,98 @@ void AntWorld::forage() {
 
         std::vector<Coord>visibleFood=ant.foodScan(this->foodMap);
 
-        if (!visibleFood.empty()) {
-            bool safeFoodFound=false;
-            Coord destination=ant.position;
-            int lowestRoundTripCost=ant.energy+1;
+        for (Coord discoveredFood : visibleFood) {
+            bool foodAlreadyKnown = false;
 
-            for (Coord foodLocation:visibleFood){
-                std::vector<Coord> pathToFood=shortestPath(this->terrainMap, ant.position,foodLocation);
+            for (Coord knownFood : knownFoodLocations) {
+                if (knownFood == discoveredFood) {
+                    foodAlreadyKnown = true;
+                    break;
+                }
+            }
 
-                std::vector<Coord> pathHome=shortestPath(this->terrainMap,foodLocation,ant.homeCoord);
+            if (!foodAlreadyKnown) {
+                knownFoodLocations.push_back(discoveredFood);
+            }
+        }
 
-                int roundTripCost=calculatePathCost(this->terrainMap,pathToFood)+calculatePathCost(this->terrainMap,pathHome);
+        if (!knownFoodLocations.empty()) {
+            bool safeFoodFound = false;
+            Coord destination = ant.position;
+            int lowestRoundTripCost = ant.energy + 1;
 
-                if (roundTripCost<=ant.energy && roundTripCost<lowestRoundTripCost) {
-                    lowestRoundTripCost=roundTripCost;
-                    destination=foodLocation;
-                    safeFoodFound=true;
+            for (Coord knownFoodLocation : knownFoodLocations) {
+                std::vector<Coord> pathToFood =
+                    shortestPath(
+                        this->terrainMap,
+                        ant.position,
+                        knownFoodLocation
+                    );
+
+                std::vector<Coord> pathHome =
+                    shortestPath(
+                        this->terrainMap,
+                        knownFoodLocation,
+                        ant.homeCoord
+                    );
+
+                int roundTripCost =
+                    calculatePathCost(
+                        this->terrainMap,
+                        pathToFood
+                    )
+                    +
+                    calculatePathCost(
+                        this->terrainMap,
+                        pathHome
+                    );
+
+                if (roundTripCost < ant.energy &&
+                    roundTripCost < lowestRoundTripCost) {
+
+                    lowestRoundTripCost = roundTripCost;
+                    destination = knownFoodLocation;
+                    safeFoodFound = true;
                 }
             }
 
             if (safeFoodFound) {
-                ant.move(this->terrainMap, destination,this->foodMap);
+                Coord finalPosition =
+                    ant.move(
+                        this->terrainMap,
+                        destination,
+                        this->foodMap
+                    );
 
-                std::cout << "Ant "<<currentAntNumber<<" moved to ("<< ant.position.first << ", "<< ant.position.second << ")"<< " | carrying food: "<< ant.carryingFood<< " | energy: "<< ant.energy<< std::endl;
+                if (finalPosition == destination) {
+                    for (int knownFoodIndex = 0;
+                         knownFoodIndex <
+                         static_cast<int>(knownFoodLocations.size());
+                         knownFoodIndex++) {
+
+                        if (knownFoodLocations[knownFoodIndex] ==
+                            destination) {
+
+                            knownFoodLocations.erase(
+                                knownFoodLocations.begin() +
+                                knownFoodIndex
+                            );
+
+                            break;
+                        }
+                    }
+                }
+
+                std::cout << "Ant " << currentAntNumber
+                          << " moved to known food at ("
+                          << ant.position.first << ", "
+                          << ant.position.second << ")"
+                          << " | carrying food: "
+                          << ant.carryingFood
+                          << " | energy: "
+                          << ant.energy
+                          << std::endl;
+
                 continue;
             }
         }
